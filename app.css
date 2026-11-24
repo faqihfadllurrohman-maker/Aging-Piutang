@@ -1,0 +1,252 @@
+/* Styles for Invoice & Billing Management App */
+:root {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: #eff6ff;
+  --secondary: #475569;
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+  --warning: #d97706;
+  --warning-bg: #fef3c7;
+  --info: #0284c7;
+  --info-bg: #e0f2fe;
+  --bni-color: #0369a1;
+  --ump-color: #7c3aed;
+  --mva-color: #0d9488;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #1e293b;
+  background-color: #f8fafc;
+  min-height: 100vh;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-jatuh-tempo {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.badge-belum-jatuh-tempo {
+  background-color: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.badge-sudah-bayar {
+  background-color: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.badge-belum-bayar {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.badge-bni {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.badge-ump {
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #e9d5ff;
+}
+
+.badge-mva {
+  background-color: #ccfbf1;
+  color: #0f766e;
+  border: 1px solid #99f6e4;
+}
+
+.badge-default {
+  background-color: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+/* Table styling */
+.table-container {
+  overflow-x: auto;
+  max-width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  background: #ffffff;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+th {
+  background-color: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  padding: 0.75rem 0.65rem;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+  user-select: none;
+}
+
+th.sortable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+th.sortable:hover {
+  background-color: #f1f5f9;
+  color: #1e293b;
+}
+
+td {
+  padding: 0.65rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+tr:hover td {
+  background-color: #f8fafc;
+}
+
+tr.selected td {
+  background-color: #eff6ff;
+}
+
+/* Sticky column for checkbox and actions */
+.sticky-col-left {
+  position: sticky;
+  left: 0;
+  background-color: inherit;
+  z-index: 10;
+}
+
+.sticky-col-right {
+  position: sticky;
+  right: 0;
+  background-color: #ffffff;
+  z-index: 10;
+  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.04);
+}
+
+tr:hover .sticky-col-right {
+  background-color: #f8fafc;
+}
+
+/* Floating Batch Bar */
+#batchActionBar {
+  transition: all 0.25s ease-in-out;
+}
+
+/* Modal animation */
+.modal-overlay {
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(3px);
+  transition: opacity 0.2s ease;
+}
+
+.modal-content {
+  transition: transform 0.2s ease;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Toast */
+.toast-item {
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Print Stylesheet */
+@media print {
+  body {
+    background: white;
+    color: black;
+    font-size: 8pt;
+  }
+  
+  header, #batchActionBar, #chartsSection, #filterSection, #paginationContainer, .no-print {
+    display: none !important;
+  }
+
+  .table-container {
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  table {
+    width: 100%;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  th, td {
+    padding: 4px;
+    border: 1px solid #ccc;
+  }
+
+  .sticky-col-right, .sticky-col-left {
+    position: static;
+    box-shadow: none;
+  }
+
+  .print-header {
+    display: block !important;
+    margin-bottom: 20px;
+  }
+}

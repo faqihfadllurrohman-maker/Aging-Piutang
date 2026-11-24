@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Manajemen Invoice & Piutang - Monitoring Jatuh Tempo & Pelunasan</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Vendor Scripts (Local offline with CDN fallback) -->
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/lucide.js"></script>
+
+  <!-- Firebase Cloud Real-time SDK (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
+
+  <!-- Printable Header (Visible only when printing) -->
+  <div class="print-header hidden p-4 border-b">
+    <div class="flex justify-between items-center">
+      <div>
+        <h1 class="text-xl font-bold text-slate-900">LAPORAN MONITORING INVOICE & PIUTANG</h1>
+        <p class="text-xs text-slate-500">Dicetak pada: <span id="printDate"></span></p>
+      </div>
+      <div class="text-right text-xs text-slate-600">
+        <p>Total Data: <span id="printTotalRows">0</span></p>
+        <p>Total Tagihan: <span id="printTotalAmount">Rp 0</span></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App Header / Navigation -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        
+        <!-- Brand / Title -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+            <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-lg font-bold text-slate-900 leading-tight">Invoice & Piutang Hub</h1>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                v2.0 Pro
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 hidden sm:block">Monitoring Jatuh Tempo (>30 Hari) & Rekonsiliasi Pelunasan (BNI, UMP, MVA)</p>
+          </div>
+        </div>
+
+        <!-- Top Right Actions & Admin Toggle -->
+        <div class="flex items-center gap-2 sm:gap-3">
+
+          <!-- Cloud Database (Firebase Real-Time) Button -->
+          <button id="btnOpenCloudModal" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm bg-white hover:bg-slate-50 border-slate-300 text-slate-700">
+            <span id="cloudStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+            <span id="cloudStatusText" class="hidden sm:inline">Cloud Database</span>
+            <span id="cloudLiveBadge" class="hidden px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full animate-pulse">LIVE</span>
+            <i id="cloudStatusIcon" data-lucide="cloud" class="w-3.5 h-3.5 text-slate-400"></i>
+          </button>
+          
+          <!-- Admin Mode Toggle Switch -->
+          <div class="flex items-center bg-slate-100 hover:bg-slate-200/80 p-1.5 rounded-lg border border-slate-200 transition-colors">
+            <label for="adminModeToggle" class="flex items-center gap-2 cursor-pointer text-xs font-semibold select-none px-1">
+              <span id="adminStatusText" class="text-emerald-700 font-bold flex items-center gap-1">
+                <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Admin Aktif
+              </span>
+              <input type="checkbox" id="adminModeToggle" checked class="sr-only peer">
+              <div class="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative"></div>
+            </label>
+          </div>
+
+          <!-- Add Invoice Button (Admin Only) -->
+          <button id="btnTambahInvoice" class="admin-only inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm shadow-blue-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]">
+            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+            <span class="hidden md:inline">Tambah</span> Invoice
+          </button>
+
+          <!-- Import Button -->
+          <button id="btnOpenImportModal" class="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-sm shadow-emerald-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]">
+            <i data-lucide="upload" class="w-4 h-4"></i>
+            <span class="hidden md:inline">Import</span> Data
+          </button>
+
+          <!-- Export Dropdown -->
+          <div class="relative inline-block text-left">
+            <button id="btnExportMenu" class="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold shadow-sm transition-colors">
+              <i data-lucide="download" class="w-4 h-4 text-slate-500"></i>
+              <span>Export</span>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
+            </button>
+            <div id="exportDropdownMenu" class="hidden absolute right-0 mt-2 w-52 rounded-xl shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-slate-100 z-50">
+              <div class="py-1">
+                <button id="btnExportExcel" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2">
+                  <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i> Ekspor ke Excel (.xlsx)
+                </button>
+                <button id="btnExportCSV" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2">
+                  <i data-lucide="file-text" class="w-4 h-4 text-blue-600"></i> Ekspor ke CSV (.csv)
+                </button>
+                <button id="btnPrintReport" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2">
+                  <i data-lucide="printer" class="w-4 h-4 text-purple-600"></i> Cetak / Simpan PDF
+                </button>
+              </div>
+              <div class="py-1">
+                <button id="btnBackupJSON" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                  <i data-lucide="database" class="w-4 h-4 text-amber-600"></i> Backup Database (JSON)
+                </button>
+                <label for="restoreJSONInput" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer">
+                  <i data-lucide="rotate-ccw" class="w-4 h-4 text-slate-600"></i> Restore Backup (JSON)
+                  <input type="file" id="restoreJSONInput" accept=".json" class="hidden">
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Template & Options Dropdown -->
+          <div class="relative inline-block text-left">
+            <button id="btnOptionsMenu" class="p-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold shadow-sm">
+              <i data-lucide="more-vertical" class="w-4 h-4"></i>
+            </button>
+            <div id="optionsDropdownMenu" class="hidden absolute right-0 mt-2 w-56 rounded-xl shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-slate-100 z-50">
+              <div class="p-2">
+                <p class="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 tracking-wider">Template Import</p>
+                <button id="btnDownloadTemplateExcel" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded-lg flex items-center gap-2">
+                  <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5 text-emerald-600"></i> Unduh Template Excel (.xlsx)
+                </button>
+                <button id="btnDownloadTemplateCSV" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg flex items-center gap-2">
+                  <i data-lucide="file-text" class="w-3.5 h-3.5 text-blue-600"></i> Unduh Template CSV (.csv)
+                </button>
+              </div>
+              <div class="p-2">
+                <p class="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 tracking-wider">Manajemen Data</p>
+                <button id="btnResetData" class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg flex items-center gap-2">
+                  <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Reset ke Data Asli (337 Baris)
+                </button>
+                <button id="btnClearAllData" class="w-full text-left px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Kosongkan Semua Data
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI / Executive Summary Cards -->
+    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4" id="kpiSection">
+      
+      <!-- Card 1: Total Invoices -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-500 mb-2">
+          <span class="text-xs font-semibold">Total Tagihan</span>
+          <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <i data-lucide="receipt" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div>
+          <div id="kpiTotalAmount" class="text-base sm:text-lg font-bold text-slate-900 truncate">Rp 0</div>
+          <div class="text-[11px] text-slate-500 mt-0.5"><span id="kpiTotalCount" class="font-bold text-slate-700">0</span> Invoice Terdaftar</div>
+        </div>
+      </div>
+
+      <!-- Card 2: Jatuh Tempo (> 30 Hari) -->
+      <div class="bg-white p-4 rounded-xl border border-rose-200 shadow-sm flex flex-col justify-between relative overflow-hidden">
+        <div class="absolute top-0 right-0 w-1.5 h-full bg-rose-500"></div>
+        <div class="flex items-center justify-between text-rose-600 mb-2">
+          <span class="text-xs font-semibold flex items-center gap-1">
+            <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> Jatuh Tempo
+          </span>
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">&gt; 30 Hari</span>
+        </div>
+        <div>
+          <div id="kpiJatuhTempoAmount" class="text-base sm:text-lg font-bold text-rose-700 truncate">Rp 0</div>
+          <div class="text-[11px] text-rose-600 mt-0.5"><span id="kpiJatuhTempoCount" class="font-bold">0</span> Invoice Overdue</div>
+        </div>
+      </div>
+
+      <!-- Card 3: Belum Jatuh Tempo (<= 30 Hari) -->
+      <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm flex flex-col justify-between relative overflow-hidden">
+        <div class="absolute top-0 right-0 w-1.5 h-full bg-emerald-500"></div>
+        <div class="flex items-center justify-between text-emerald-700 mb-2">
+          <span class="text-xs font-semibold flex items-center gap-1">
+            <i data-lucide="clock" class="w-3.5 h-3.5"></i> Belum Jth Tempo
+          </span>
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">&le; 30 Hari</span>
+        </div>
+        <div>
+          <div id="kpiBelumJatuhTempoAmount" class="text-base sm:text-lg font-bold text-emerald-700 truncate">Rp 0</div>
+          <div class="text-[11px] text-emerald-600 mt-0.5"><span id="kpiBelumJatuhTempoCount" class="font-bold">0</span> Invoice Lancar</div>
+        </div>
+      </div>
+
+      <!-- Card 4: Sudah Bayar (Lunas) -->
+      <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm flex flex-col justify-between">
+        <div class="flex items-center justify-between text-emerald-700 mb-2">
+          <span class="text-xs font-semibold flex items-center gap-1">
+            <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Sudah Bayar
+          </span>
+          <div class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <i data-lucide="wallet" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div>
+          <div id="kpiSudahBayarAmount" class="text-base sm:text-lg font-bold text-emerald-700 truncate">Rp 0</div>
+          <div class="text-[11px] text-emerald-600 mt-0.5"><span id="kpiSudahBayarCount" class="font-bold">0</span> Telah Dilunasi</div>
+        </div>
+      </div>
+
+      <!-- Card 5: Belum Bayar (Outstanding) -->
+      <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex flex-col justify-between">
+        <div class="flex items-center justify-between text-amber-700 mb-2">
+          <span class="text-xs font-semibold flex items-center gap-1">
+            <i data-lucide="hourglass" class="w-3.5 h-3.5"></i> Belum Bayar
+          </span>
+          <div class="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+            <i data-lucide="coins" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div>
+          <div id="kpiBelumBayarAmount" class="text-base sm:text-lg font-bold text-amber-700 truncate">Rp 0</div>
+          <div class="text-[11px] text-amber-600 mt-0.5"><span id="kpiBelumBayarCount" class="font-bold">0</span> Piutang Aktif</div>
+        </div>
+      </div>
+
+      <!-- Card 6: Saluran Pembayaran Rekap -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-500 mb-2">
+          <span class="text-xs font-semibold">Saluran Bayar</span>
+          <div class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <i data-lucide="credit-card" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="flex items-center justify-between text-xs pt-1">
+          <div class="text-center">
+            <div class="text-[10px] font-bold text-sky-700">BNI</div>
+            <div id="kpiBniCount" class="font-bold text-slate-800 text-sm">0</div>
+          </div>
+          <div class="text-center border-x border-slate-100 px-2">
+            <div class="text-[10px] font-bold text-purple-700">UMP</div>
+            <div id="kpiUmpCount" class="font-bold text-slate-800 text-sm">0</div>
+          </div>
+          <div class="text-center">
+            <div class="text-[10px] font-bold text-teal-700">MVA</div>
+            <div id="kpiMvaCount" class="font-bold text-slate-800 text-sm">0</div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Visual Charts Accordion / Section -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 no-print" id="chartsSection">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <div class="flex items-center gap-2">
+          <i data-lucide="bar-chart-3" class="w-5 h-5 text-blue-600"></i>
+          <h2 class="text-sm font-bold text-slate-900">Analisis Visual & Portofolio Piutang</h2>
+        </div>
+        <button id="btnToggleCharts" class="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors">
+          <span id="toggleChartsText">Sembunyikan Grafik</span>
+          <i id="toggleChartsIcon" data-lucide="chevron-up" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div id="chartsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        
+        <!-- Chart 1: Status Jatuh Tempo -->
+        <div class="flex flex-col items-center bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+          <h3 class="text-xs font-semibold text-slate-700 mb-2">Status Jatuh Tempo (> 30 Hari)</h3>
+          <div class="w-full h-44 relative flex items-center justify-center">
+            <canvas id="chartJatuhTempo"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 2: Status Pembayaran -->
+        <div class="flex flex-col items-center bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+          <h3 class="text-xs font-semibold text-slate-700 mb-2">Status Pembayaran</h3>
+          <div class="w-full h-44 relative flex items-center justify-center">
+            <canvas id="chartPembayaran"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 3: Metode Pembayaran (BNI, UMP, MVA) -->
+        <div class="flex flex-col items-center bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+          <h3 class="text-xs font-semibold text-slate-700 mb-2">Metode Pembayaran (BNI, UMP, MVA)</h3>
+          <div class="w-full h-44 relative flex items-center justify-center">
+            <canvas id="chartMetodeBayar"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 4: Portofolio -->
+        <div class="flex flex-col items-center bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+          <h3 class="text-xs font-semibold text-slate-700 mb-2">Distribusi per Portofolio</h3>
+          <div class="w-full h-44 relative flex items-center justify-center">
+            <canvas id="chartPortofolio"></canvas>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Filters, Search, and Tools Section -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4 no-print" id="filterSection">
+      
+      <!-- Row 1: Quick Filter Pills -->
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-slate-400 font-semibold mr-1 flex items-center gap-1">
+          <i data-lucide="filter" class="w-3.5 h-3.5"></i> Preset:
+        </span>
+        <button data-quick-filter="all" class="quick-pill active px-3 py-1.5 rounded-full font-medium transition-all bg-blue-600 text-white shadow-sm">
+          Semua Data (<span class="badge-total-count">0</span>)
+        </button>
+        <button data-quick-filter="jatuh-tempo" class="quick-pill px-3 py-1.5 rounded-full font-medium transition-all bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-700">
+          ⚠️ Jatuh Tempo (>30 Hari)
+        </button>
+        <button data-quick-filter="belum-jatuh-tempo" class="quick-pill px-3 py-1.5 rounded-full font-medium transition-all bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+          ✅ Belum Jatuh Tempo
+        </button>
+        <button data-quick-filter="belum-bayar" class="quick-pill px-3 py-1.5 rounded-full font-medium transition-all bg-slate-100 text-slate-700 hover:bg-amber-50 hover:text-amber-700">
+          ⏳ Belum Bayar
+        </button>
+        <button data-quick-filter="sudah-bayar" class="quick-pill px-3 py-1.5 rounded-full font-medium transition-all bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700">
+          💳 Sudah Bayar (Lunas)
+        </button>
+      </div>
+
+      <!-- Row 2: Search input & Detailed Dropdown Selects -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        
+        <!-- Live Search -->
+        <div class="lg:col-span-2 relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+            <i data-lucide="search" class="w-4 h-4"></i>
+          </div>
+          <input type="text" id="searchInput" placeholder="Cari No. Invoice, Customer, Order..." class="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all">
+          <button id="btnClearSearch" class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <!-- Filter Portofolio -->
+        <div>
+          <select id="filterPortofolio" class="w-full py-2 px-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white">
+            <option value="">Semua Portofolio</option>
+          </select>
+        </div>
+
+        <!-- Filter Jatuh Tempo -->
+        <div>
+          <select id="filterJatuhTempo" class="w-full py-2 px-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white">
+            <option value="">Semua Status JT</option>
+            <option value="Jatuh Tempo">Jatuh Tempo (&gt;30 Hari)</option>
+            <option value="Belum Jatuh Tempo">Belum Jatuh Tempo (&le;30 Hari)</option>
+          </select>
+        </div>
+
+        <!-- Filter Status Bayar -->
+        <div>
+          <select id="filterStatusBayar" class="w-full py-2 px-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white">
+            <option value="">Semua Pembayaran</option>
+            <option value="Belum Bayar">Belum Bayar</option>
+            <option value="Sudah Bayar">Sudah Bayar</option>
+          </select>
+        </div>
+
+        <!-- Filter Metode Pembayaran -->
+        <div>
+          <select id="filterMetodeBayar" class="w-full py-2 px-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white">
+            <option value="">Semua Metode</option>
+            <option value="BNI">BNI</option>
+            <option value="UMP">UMP</option>
+            <option value="MVA">MVA</option>
+            <option value="NONE">Belum Diisi</option>
+          </select>
+        </div>
+
+      </div>
+
+      <!-- Active Filters summary and Reset Button -->
+      <div class="flex items-center justify-between text-xs text-slate-500 pt-1">
+        <div id="filterSummaryText">
+          Menampilkan <span id="filteredRowsCount" class="font-bold text-slate-800">0</span> dari <span id="totalRowsCount" class="font-bold text-slate-800">0</span> baris
+        </div>
+        <button id="btnResetFilters" class="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Reset Filter
+        </button>
+      </div>
+
+    </section>
+
+    <!-- Batch Floating Action Bar (Shows when rows are selected) -->
+    <div id="batchActionBar" class="hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl z-40 flex items-center gap-4 text-xs border border-slate-700 animate-bounce-subtle">
+      <div class="flex items-center gap-2 pr-3 border-r border-slate-700">
+        <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-[11px]" id="selectedBatchCount">0</span>
+        <span class="font-medium">Item Terpilih</span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <!-- Batch Mark Paid -->
+        <button id="btnBatchMarkPaid" class="admin-only px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold flex items-center gap-1.5 transition-colors">
+          <i data-lucide="check-check" class="w-3.5 h-3.5"></i> Tandai Lunas
+        </button>
+
+        <!-- Batch Set Payment Method -->
+        <div class="admin-only flex items-center gap-1">
+          <select id="batchMethodSelect" class="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs">
+            <option value="">Set Via...</option>
+            <option value="BNI">BNI</option>
+            <option value="UMP">UMP</option>
+            <option value="MVA">MVA</option>
+          </select>
+          <button id="btnApplyBatchMethod" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold">
+            Terapkan
+          </button>
+        </div>
+
+        <!-- Batch Export -->
+        <button id="btnBatchExport" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold flex items-center gap-1.5 border border-slate-700">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i> Ekspor Excel
+        </button>
+
+        <!-- Batch Delete (Admin only) -->
+        <button id="btnBatchDelete" class="admin-only px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-semibold flex items-center gap-1.5">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Hapus
+        </button>
+
+        <!-- Deselect All -->
+        <button id="btnBatchDeselect" class="text-slate-400 hover:text-white p-1 ml-1" title="Batalkan Pilihan">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Data Table Section -->
+    <section class="space-y-3">
+      
+      <!-- Table Controls Bar (Page Size, Columns Toggle) -->
+      <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-slate-500">Tampilkan</span>
+          <select id="pageSizeSelect" class="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:ring-1 focus:ring-blue-500">
+            <option value="10">10 baris</option>
+            <option value="25" selected>25 baris</option>
+            <option value="50">50 baris</option>
+            <option value="100">100 baris</option>
+            <option value="all">Semua baris</option>
+          </select>
+          <span class="text-slate-500">per halaman</span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 hidden sm:inline">* Klik judul kolom untuk mengurutkan (Sort)</span>
+        </div>
+      </div>
+
+      <!-- Main Responsive Table Container -->
+      <div class="table-container">
+        <table id="invoiceTable" class="min-w-full divide-y divide-slate-200">
+          <thead>
+            <tr>
+              <!-- Checkbox Select All -->
+              <th class="sticky-col-left w-10 text-center px-2">
+                <input type="checkbox" id="selectAllCheckbox" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+              </th>
+              
+              <!-- Core Columns from Spreadsheet -->
+              <th class="sortable text-center w-12" data-sort="id">No. <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="noInvoice">No. Invoice <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="tanggal">Tanggal <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="customer">Customer <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="pelanggan">Pelanggan <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="portofolio">Portofolio <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="kegiatan">Kegiatan <span class="sort-icon">↕</span></th>
+              <th class="sortable text-left" data-sort="orderNumber">Order Number <span class="sort-icon">↕</span></th>
+              <th class="sortable text-right" data-sort="saldoKonversi">Saldo Konversi <span class="sort-icon">↕</span></th>
+              <th class="sortable text-center" data-sort="dayInvoice">Day (Inv) <span class="sort-icon">↕</span></th>
+              
+              <!-- Additional Column 1: Status Jatuh Tempo -->
+              <th class="sortable text-center" data-sort="statusJatuhTempo">Status Jatuh Tempo <span class="sort-icon">↕</span></th>
+              
+              <!-- Additional Column 2: Pembayaran Via -->
+              <th class="sortable text-center" data-sort="pembayaranVia">Pembayaran Via <span class="sort-icon">↕</span></th>
+              
+              <!-- Additional Column 3: Status Pembayaran -->
+              <th class="sortable text-center" data-sort="statusPembayaran">Status Bayar <span class="sort-icon">↕</span></th>
+              <th class="sortable text-right" data-sort="nominalPelunasan">Nominal Pelunasan <span class="sort-icon">↕</span></th>
+              <th class="sortable text-center" data-sort="tanggalPelunasan">Tgl Pelunasan <span class="sort-icon">↕</span></th>
+              
+              <!-- Additional Column 4: Keterangan -->
+              <th class="sortable text-left" data-sort="keterangan">Keterangan <span class="sort-icon">↕</span></th>
+              
+              <!-- Actions -->
+              <th class="sticky-col-right text-center no-print">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="invoiceTableBody" class="divide-y divide-slate-100 bg-white">
+            <!-- Dynamic rows will be rendered here by app.js -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Container -->
+      <div id="paginationContainer" class="flex flex-col sm:flex-row items-center justify-between gap-4 py-3 border-t border-slate-200 no-print text-xs text-slate-600">
+        <div>
+          Menampilkan <span id="pageStart" class="font-bold text-slate-900">1</span> sampai <span id="pageEnd" class="font-bold text-slate-900">25</span> dari <span id="totalFilteredCount" class="font-bold text-slate-900">0</span> total data
+        </div>
+        
+        <div class="flex items-center gap-1.5" id="paginationButtons">
+          <!-- Prev, Page numbers, Next rendered dynamically -->
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-slate-200 mt-auto py-4 text-center text-xs text-slate-400 no-print">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <p>Sistem Manajemen Invoice & Piutang © 2026 - Dilengkapi Fitur Import, Edit Admin, Filter & Rekonsiliasi Otomatis</p>
+      <p class="text-[11px] text-slate-500">Google Sheets Synchronization & Auto Due Date Calculator (>30 Hari)</p>
+    </div>
+  </footer>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- Modal 1: Form Tambah / Edit Invoice -->
+  <div id="modalInvoiceForm" class="fixed inset-0 z-50 hidden overflow-y-auto modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full modal-content border border-slate-200 overflow-hidden">
+      
+      <!-- Modal Header -->
+      <div class="px-6 py-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+            <i data-lucide="edit-3" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 id="modalFormTitle" class="text-sm font-bold">Edit Invoice</h3>
+            <p class="text-[11px] text-slate-300">Lengkapi data invoice dan detail pembayaran</p>
+          </div>
+        </div>
+        <button type="button" class="close-modal-btn text-slate-400 hover:text-white p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body Form -->
+      <form id="invoiceForm" class="p-6 space-y-4 text-xs">
+        <input type="hidden" id="formInvoiceId">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- No Invoice -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">No. Invoice <span class="text-rose-500">*</span></label>
+            <input type="text" id="formNoInvoice" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 37012000156">
+          </div>
+
+          <!-- Tanggal Invoice -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Tanggal Invoice <span class="text-rose-500">*</span></label>
+            <input type="text" id="formTanggal" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 4-Feb-20 atau YYYY-MM-DD">
+          </div>
+
+          <!-- Customer -->
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-slate-700 mb-1">Nama Customer <span class="text-rose-500">*</span></label>
+            <input type="text" id="formCustomer" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: BERCA GEMILANG">
+          </div>
+
+          <!-- Pelanggan ID -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Kode / ID Pelanggan</label>
+            <input type="text" id="formPelanggan" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 47692">
+          </div>
+
+          <!-- Portofolio -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Portofolio</label>
+            <input type="text" id="formPortofolio" list="portofolioDatalist" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Pilih atau ketik portofolio">
+            <datalist id="portofolioDatalist"></datalist>
+          </div>
+
+          <!-- Kegiatan -->
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-slate-700 mb-1">Kegiatan / Uraian Pekerjaan</label>
+            <input type="text" id="formKegiatan" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: SERTIFIKASI OVER HEAD CRANE">
+          </div>
+
+          <!-- Order Number -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Order Number</label>
+            <input type="text" id="formOrderNumber" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 3701021900258">
+          </div>
+
+          <!-- Saldo Konversi -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Saldo Konversi (Nilai Tagihan Rp) <span class="text-rose-500">*</span></label>
+            <input type="number" id="formSaldoKonversi" required min="0" step="any" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 33500000">
+          </div>
+
+          <!-- Day Invoice -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Day (Invoice) <span class="text-slate-400 font-normal">Hari Berjalan</span></label>
+            <input type="number" id="formDayInvoice" min="0" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: 45">
+            <p class="text-[10px] text-slate-400 mt-1">&gt; 30 Hari otomatis <b>Jatuh Tempo</b>, &le; 30 Hari <b>Belum Jatuh Tempo</b></p>
+          </div>
+
+          <!-- Status Jatuh Tempo Preview -->
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Status Jatuh Tempo (Otomatis)</label>
+            <div id="formStatusJatuhTempoBadge" class="py-2">
+              <span class="badge badge-belum-jatuh-tempo">Belum Jatuh Tempo</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Pembayaran & Pelunasan (User requested additions) -->
+        <div class="mt-4 pt-4 border-t border-slate-200">
+          <h4 class="font-bold text-slate-900 mb-3 flex items-center gap-1.5 text-xs text-blue-700">
+            <i data-lucide="credit-card" class="w-4 h-4"></i> Informasi Pembayaran & Pelunasan
+          </h4>
+          
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            
+            <!-- Pembayaran Via: BNI, UMP, MVA -->
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pembayaran Via (BNI / UMP / MVA)</label>
+              <select id="formPembayaranVia" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-medium">
+                <option value="">-- Pilih Saluran Bayar --</option>
+                <option value="BNI">BNI (Bank Negara Indonesia)</option>
+                <option value="UMP">UMP</option>
+                <option value="MVA">MVA (Mandiri Virtual Account / Multi VA)</option>
+                <option value="Lainnya">Lainnya / Transfer Manual</option>
+              </select>
+            </div>
+
+            <!-- Status Pembayaran: Sudah Bayar / Belum Bayar -->
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Status Pembayaran</label>
+              <select id="formStatusPembayaran" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold">
+                <option value="Belum Bayar">Belum Bayar</option>
+                <option value="Sudah Bayar">Sudah Bayar</option>
+              </select>
+            </div>
+
+            <!-- Nominal Pelunasan -->
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Nominal Pelunasan (Rp)</label>
+              <input type="number" id="formNominalPelunasan" min="0" step="any" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="0">
+              <button type="button" id="btnAutoFillFullAmount" class="text-[10px] text-blue-600 hover:underline mt-1">Set Sama dengan Saldo Konversi</button>
+            </div>
+
+            <!-- Tanggal Pelunasan -->
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Tanggal Pelunasan</label>
+              <input type="date" id="formTanggalPelunasan" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <!-- Keterangan -->
+            <div class="sm:col-span-2">
+              <label class="block font-semibold text-slate-700 mb-1">Keterangan</label>
+              <input type="text" id="formKeterangan" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Otomatis 'Sudah Bayar' atau 'Belum Bayar'">
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="pt-4 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" class="close-modal-btn px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium">
+            Batal
+          </button>
+          <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-md shadow-blue-500/20">
+            Simpan Perubahan
+          </button>
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+
+  <!-- Modal 2: Quick Pay / Pelunasan Cepat -->
+  <div id="modalQuickPay" class="fixed inset-0 z-50 hidden overflow-y-auto modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full modal-content border border-slate-200 overflow-hidden">
+      
+      <div class="px-6 py-4 bg-gradient-to-r from-emerald-700 to-emerald-600 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-800 flex items-center justify-center text-white">
+            <i data-lucide="check-circle" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold">Catat Pelunasan Tagihan</h3>
+            <p class="text-[11px] text-emerald-100">Konfirmasi pembayaran invoice</p>
+          </div>
+        </div>
+        <button type="button" class="close-modal-btn text-emerald-200 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="quickPayForm" class="p-6 space-y-4 text-xs">
+        <input type="hidden" id="quickPayInvoiceId">
+
+        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
+          <div class="flex justify-between">
+            <span class="text-slate-500">No. Invoice:</span>
+            <span id="quickPayNoInvoice" class="font-bold text-slate-800"></span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Customer:</span>
+            <span id="quickPayCustomer" class="font-semibold text-slate-800"></span>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-slate-200">
+            <span class="text-slate-500">Total Tagihan:</span>
+            <span id="quickPayTotalTagihan" class="font-bold text-blue-700 text-sm"></span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Metode Pembayaran (Via) <span class="text-rose-500">*</span></label>
+          <select id="quickPayVia" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold">
+            <option value="BNI">BNI</option>
+            <option value="UMP">UMP</option>
+            <option value="MVA">MVA</option>
+            <option value="Lainnya">Lainnya</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Nominal Pelunasan (Rp) <span class="text-rose-500">*</span></label>
+          <input type="number" id="quickPayNominal" required min="1" step="any" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Tanggal Pelunasan <span class="text-rose-500">*</span></label>
+          <input type="date" id="quickPayTanggal" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Keterangan</label>
+          <input type="text" id="quickPayKeterangan" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500" value="Sudah Bayar">
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" class="close-modal-btn px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium">
+            Batal
+          </button>
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-md shadow-emerald-500/20">
+            Konfirmasi Lunas
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- Modal 3: Import Data (Excel / CSV) with Template Matching -->
+  <div id="modalImport" class="fixed inset-0 z-50 hidden overflow-y-auto modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full modal-content border border-slate-200 overflow-hidden">
+      
+      <div class="px-6 py-4 bg-gradient-to-r from-emerald-800 to-teal-800 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center text-white">
+            <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold">Import Data Spreadsheet</h3>
+            <p class="text-[11px] text-emerald-100">Mendukung format Google Sheets & Excel (.xlsx, .csv)</p>
+          </div>
+        </div>
+        <button type="button" class="close-modal-btn text-emerald-200 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-4 text-xs">
+        
+        <!-- Drag & Drop Zone -->
+        <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-8 text-center bg-slate-50/50 hover:bg-emerald-50/30 transition-all cursor-pointer">
+          <input type="file" id="importFileInput" accept=".xlsx, .xls, .csv" class="hidden">
+          <i data-lucide="file-spreadsheet" class="w-10 h-10 text-emerald-600 mx-auto mb-2"></i>
+          <p class="font-bold text-slate-700 text-sm">Klik untuk memilih file atau seret file ke sini</p>
+          <p class="text-slate-400 mt-1">Format didukung: <b>.xlsx, .xls, .csv</b> (Sesuai kolom link spreadsheet Google)</p>
+          <div class="mt-4 flex items-center justify-center gap-3">
+            <button type="button" id="btnDownloadTemplateInModal" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-semibold shadow-sm">
+              <i data-lucide="download" class="w-3.5 h-3.5 text-emerald-600"></i> Unduh Template (.xlsx)
+            </button>
+          </div>
+        </div>
+
+        <!-- Import Mode Selection -->
+        <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+          <label class="block font-bold text-slate-700 mb-2">Pilihan Mode Import:</label>
+          <div class="flex flex-col sm:flex-row gap-3">
+            <label class="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+              <input type="radio" name="importMode" value="append" checked class="text-emerald-600 focus:ring-emerald-500">
+              <span><b>Tambahkan (Append)</b> ke data yang sudah ada</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+              <input type="radio" name="importMode" value="replace" class="text-emerald-600 focus:ring-emerald-500">
+              <span class="text-rose-700"><b>Timpa (Replace)</b> semua data lama</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Preview Container -->
+        <div id="importPreviewContainer" class="hidden space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-800">Preview Data Terbaca (<span id="previewCount">0</span> baris):</span>
+            <span class="text-[11px] text-emerald-700 font-semibold">Format Kolom Valid</span>
+          </div>
+          <div class="max-h-48 overflow-y-auto border border-slate-200 rounded-lg text-[11px]">
+            <table class="w-full divide-y divide-slate-200">
+              <thead class="bg-slate-100 text-slate-700 font-semibold" id="previewTableHead"></thead>
+              <tbody class="divide-y divide-slate-100 bg-white" id="previewTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Import Footer Actions -->
+        <div class="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" class="close-modal-btn px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium">
+            Batal
+          </button>
+          <button type="button" id="btnExecuteImport" disabled class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg font-bold shadow-md transition-all">
+            Proses Import
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Modal 4: Konfirmasi Hapus -->
+  <div id="modalDeleteConfirm" class="fixed inset-0 z-50 hidden overflow-y-auto modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full modal-content border border-slate-200 p-6 text-center space-y-4">
+      <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+        <i data-lucide="alert-octagon" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-slate-900">Konfirmasi Hapus Data</h3>
+        <p class="text-xs text-slate-500 mt-1" id="deleteConfirmMessage">Apakah Anda yakin ingin menghapus data invoice ini?</p>
+      </div>
+      <div class="flex items-center justify-center gap-2 pt-2">
+        <button type="button" class="close-modal-btn px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 text-xs font-semibold">
+          Batal
+        </button>
+        <button type="button" id="btnConfirmDelete" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-sm shadow-rose-500/30">
+          Ya, Hapus Data
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 5: Konfigurasi Cloud Database Terpusat (Firebase Real-Time) -->
+  <div id="modalCloudDatabase" class="fixed inset-0 z-50 hidden overflow-y-auto modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full modal-content border border-slate-200 overflow-hidden">
+      
+      <!-- Header -->
+      <div class="px-6 py-4 bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+            <i data-lucide="zap" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold">Cloud Database Terpusat (Firebase Real-Time)</h3>
+            <p class="text-[11px] text-amber-100">Sinkronisasi Instan Live Antar Pengguna &amp; Admin</p>
+          </div>
+        </div>
+        <button type="button" class="close-modal-btn text-white/80 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-4 text-xs">
+        
+        <!-- Live Connection Status Card -->
+        <div id="cloudStatusCard" class="p-3.5 rounded-xl border flex items-center justify-between bg-slate-50 border-slate-200">
+          <div class="flex items-center gap-3">
+            <span id="cloudModalStatusDot" class="w-3.5 h-3.5 rounded-full bg-slate-400"></span>
+            <div>
+              <p id="cloudModalStatusTitle" class="font-bold text-slate-800">Status: Belum Terhubung ke Cloud</p>
+              <p id="cloudModalStatusDesc" class="text-[11px] text-slate-500">Saat ini berjalan di database lokal browser</p>
+            </div>
+          </div>
+          <span id="cloudLiveTag" class="hidden px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
+            ● LIVE SYNC
+          </span>
+        </div>
+
+        <!-- 1-Click Upload Initial 337 Invoices to Cloud (Visible when connected) -->
+        <div id="cloudSeedContainer" class="hidden p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-bold text-blue-900">Upload 337 Data Awal ke Cloud</p>
+              <p class="text-[11px] text-blue-700">Kirim data Google Spreadsheet awal agar bisa diakses semua orang</p>
+            </div>
+            <button type="button" id="btnSeedCloudDatabase" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-sm transition-all">
+              <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i> Upload Sekarang
+            </button>
+          </div>
+          <div id="seedProgressBarContainer" class="hidden space-y-1">
+            <div class="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+              <div id="seedProgressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="seedProgressText" class="text-[10px] text-blue-600 font-semibold">Mengunggah: 0 / 337...</p>
+          </div>
+        </div>
+
+        <!-- Firebase Config Input Box -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center">
+            <label class="block font-semibold text-slate-700">Konfigurasi Firebase (firebaseConfig) <span class="text-rose-500">*</span></label>
+            <span class="text-[11px] text-slate-400">Gratis dari Google Firebase</span>
+          </div>
+          <textarea id="inputFirebaseConfig" rows="5" placeholder='Paste kode firebaseConfig di sini, contoh:
+const firebaseConfig = {
+  apiKey: "AIzaSy...",
+  authDomain: "invoice-tracker.firebaseapp.com",
+  projectId: "invoice-tracker",
+  storageBucket: "...",
+  messagingSenderId: "...",
+  appId: "..."
+};' class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 font-mono text-[11px] leading-relaxed bg-slate-50 focus:bg-white"></textarea>
+          <p class="text-[10px] text-slate-400">Cukup salin dan tempelkan blok <code>firebaseConfig = { ... }</code> langsung dari Firebase Console.</p>
+        </div>
+
+        <!-- 3-Step Setup Tutorial -->
+        <div class="border border-slate-200 rounded-xl p-3.5 bg-slate-50/70 space-y-2">
+          <p class="font-bold text-slate-800 flex items-center gap-1.5">
+            <i data-lucide="book-open" class="w-3.5 h-3.5 text-amber-600"></i> Cara Mendapatkan Firebase Config (3 Menit):
+          </p>
+          <ol class="list-decimal list-inside space-y-1 text-[11px] text-slate-600 pl-1">
+            <li>Buka <b><a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline">console.firebase.google.com</a></b> (login pakai akun Google Anda).</li>
+            <li>Klik <b>"Add project"</b> &gt; Beri nama (misal: <code>invoice-hub</code>) &gt; Klik Lanjutkan.</li>
+            <li>Di menu kiri, klik <b>Firestore Database</b> &gt; <b>Create database</b> &gt; Pilih mode <b>"Start in test mode"</b> &gt; Klik Create.</li>
+            <li>Klik ikon gerigi ⚙️ (Project settings) &gt; Gulir ke bawah ke bagian <b>"Your apps"</b> &gt; Klik ikon Web <b>&lt;/&gt;</b> &gt; Salin kode <code>firebaseConfig</code> dan tempelkan di kotak di atas.</li>
+          </ol>
+        </div>
+
+        <!-- Footer Buttons -->
+        <div class="pt-3 border-t border-slate-200 flex items-center justify-between">
+          <button type="button" id="btnDisconnectCloud" class="hidden text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1">
+            <i data-lucide="unlink" class="w-3.5 h-3.5"></i> Putuskan Cloud
+          </button>
+          <div class="flex items-center gap-2 ml-auto">
+            <button type="button" class="close-modal-btn px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium">
+              Batal
+            </button>
+            <button type="button" id="btnConnectFirebase" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-md shadow-amber-600/20 flex items-center gap-1.5 transition-all">
+              <i data-lucide="cloud-lightning" class="w-3.5 h-3.5"></i> Hubungkan ke Cloud
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-20 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- App Logic Scripts -->
+  <script src="initialData.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
